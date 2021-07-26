@@ -1,18 +1,33 @@
 #!/bin/bash
+# Copyright 2021 The Magma Authors.
+
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Setting up env variable, user and project path
+set -x
+
+addr1="$1"
+gw_addr="$2"
+
 MAGMA_USER="magma"
-AGW_INSTALL_CONFIG="/etc/systemd/system/multi-user.target.wants/agw_installation.service"
+AGW_INSTALL_CONFIG_LINK="/etc/systemd/system/multi-user.target.wants/agw_installation.service"
+AGW_INSTALL_CONFIG="/lib/systemd/system/agw_installation.service"
 AGW_SCRIPT_PATH="/root/agw_install.sh"
 DEPLOY_PATH="/home/$MAGMA_USER/magma/lte/gateway/deploy"
 SUCCESS_MESSAGE="ok"
 NEED_REBOOT=0
 WHOAMI=$(whoami)
-KVERS=$(uname -r)
-MAGMA_VERSION="${MAGMA_VERSION:-v1.5}"
+MAGMA_VERSION="${MAGMA_VERSION:-v1.6}"
 CLOUD_INSTALL="cloud"
 GIT_URL="${GIT_URL:-https://github.com/magma/magma.git}"
-
-
+INTERFACE_DIR="/etc/network/interfaces.d"
 
 echo "Checking if the script has been executed by root user"
 if [ "$WHOAMI" != "root" ]; then
@@ -20,10 +35,16 @@ if [ "$WHOAMI" != "root" ]; then
   exit 1
 fi
 
+echo "Checking if Ubuntu is installed"
+if ! grep -q 'Ubuntu' /etc/issue; then
+  echo "Ubuntu is not installed"
+  exit 1
+fi
+
 if [ "$SKIP_PRECHECK" != "$SUCCESS_MESSAGE" ]; then
   wget https://raw.githubusercontent.com/magma/magma/"$MAGMA_VERSION"/lte/gateway/deploy/agw_pre_check.sh
   if [[ -f ./agw_pre_check.sh ]]; then
-    chmod 644 agw_pre_check.sh && bash agw_pre_check.sh
+    bash agw_pre_check.sh
     while true; do
         read -p "Do you accept those modifications and want to proceed with magma installation?(y/n)" yn
         case $yn in
@@ -33,15 +54,86 @@ if [ "$SKIP_PRECHECK" != "$SUCCESS_MESSAGE" ]; then
         esac
     done
   else
-    echo "agw_precheck.sh is not available in your version"
+    echo "agw_pre_check.sh is not available in your version"
   fi
 fi
 
+apt-get update
 
-echo "Checking if Debian is installed"
-if ! grep -q 'Debian' /etc/issue; then
-  echo "Debian is not installed"
-  exit 1
+echo "Need to check if both interfaces are named eth0 and eth1"
+INTERFACES=$(ip -br a)
+if [[ $1 != "$CLOUD_INSTALL" ]] && ( [[ ! $INTERFACES == *'eth0'*  ]] || [[ ! $INTERFACES == *'eth1'* ]] || ! grep -q 'GRUB_CMDLINE_LINUX="net.ifnames=0 biosdevname=0"' /etc/default/grub); then
+  # changing intefaces name
+  sed -i 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="net.ifnames=0 biosdevname=0"/g' /etc/default/grub
+  sed -i 's/enp0s3/eth0/g' /etc/netplan/50-cloud-init.yaml
+  # changing interface name
+  grub-mkconfig -o /boot/grub/grub.cfg
+
+  # name server config
+  ln -sf /var/run/systemd/resolve/resolv.conf /etc/resolv.conf
+  sed -i 's/#DNS=/DNS=8.8.8.8 208.67.222.222/' /etc/systemd/resolved.conf
+  service systemd-resolved restart
+
+  # interface config
+  apt install -y ifupdown net-tools ipcalc
+  mkdir -p "$INTERFACE_DIR"
+  echo "source-directory $INTERFACE_DIR" > /etc/network/interfaces
+
+  if [ -z "$addr1" ] || [ -z "$gw_addr" ]
+  then
+    # DHCP allocated interface IP
+    echo "auto eth0
+    iface eth0 inet dhcp" > "$INTERFACE_DIR"/eth0
+  else
+    # Statically allocated interface IP
+    if ipcalc -c "$addr1" | grep INVALID
+    then
+      echo "Interface ip is not valid IP"
+      exit 1
+    fi
+
+    if ipcalc -c "$gw_addr" | grep INVALID
+    then
+      echo "Upstream Router ip is not valid IP"
+      exit 1
+    fi
+
+    addr=$(   ipcalc -n "$addr1"  | grep Address | awk '{print $2}')
+    netmask=$(ipcalc -n "$addr1"  | grep Netmask | awk '{print $2}')
+    gw_addr=$(ipcalc -n "$gw_addr"| grep Address | awk '{print $2}')
+
+    echo "auto eth0
+  iface eth0 inet static
+  address $addr
+  netmask $netmask
+  gateway $gw_addr" > "$INTERFACE_DIR"/eth0
+  fi
+
+  # configuring eth1
+  echo "auto eth1
+  iface eth1 inet static
+  address 10.0.2.1
+  netmask 255.255.255.0" > "$INTERFACE_DIR"/eth1
+
+  # get rid of netplan
+  systemctl unmask networking
+  systemctl enable networking
+
+  apt-get --assume-yes purge nplan netplan.i
+
+  # Setting REBOOT flag to 1 because we need to reload new interface and network services.
+  NEED_REBOOT=1
+else
+  echo "Interfaces name are correct, let's check if network and DNS are up"
+  while ! nslookup google.com; do
+    echo "DNS not reachable"
+    sleep 1
+  done
+
+  while ! ping -c 1 -W 1 -I eth0 8.8.8.8; do
+    echo "Network not ready yet"
+    sleep 1
+  done
 fi
 
 echo "Making sure $MAGMA_USER user is sudoers"
@@ -50,77 +142,6 @@ if ! grep -q "$MAGMA_USER ALL=(ALL) NOPASSWD:ALL" /etc/sudoers; then
   adduser --disabled-password --gecos "" $MAGMA_USER
   adduser $MAGMA_USER sudo
   echo "$MAGMA_USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-fi
-
-echo "Need to check if both interfaces are named eth0 and eth1"
-INTERFACES=$(ip -br a)
-if [[ $1 != "$CLOUD_INSTALL" ]] && ( [[ ! $INTERFACES == *'eth0'*  ]] || [[ ! $INTERFACES == *'eth1'* ]] || ! grep -q 'GRUB_CMDLINE_LINUX="net.ifnames=0 biosdevname=0"' /etc/default/grub); then
-  # changing intefaces name
-  sed -i 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="net.ifnames=0 biosdevname=0"/g' /etc/default/grub
-  # changing interface name
-  grub-mkconfig -o /boot/grub/grub.cfg
-  echo "auto eth0
-  iface eth0 inet dhcp" > /etc/network/interfaces.d/eth0
-  # configuring eth1
-  echo "auto eth1
-  iface eth1 inet static
-  address 10.0.2.1
-  netmask 255.255.255.0" > /etc/network/interfaces.d/eth1
-  # Setting REBOOT flag to 1 because we need to reload new interface and network services.
-  NEED_REBOOT=1
-else
-  echo "Interfaces name are correct, let's check if network and DNS are up"
-  while ! ping -c 1 -W 1 -I eth0 google.com; do
-    echo "Network not ready yet"
-    sleep 1
-  done
-fi
-
-echo "Checking if the right kernel version is installed (4.9.0-9-amd64)"
-if [ "$KVERS" != "4.9.0-9-amd64" ]; then
-  # Adding the snapshot to retrieve 4.9.0-9-amd64
-  if ! grep -q "deb http://snapshot.debian.org/archive/debian/20190801T025637Z" /etc/apt/sources.list; then
-    echo "deb http://snapshot.debian.org/archive/debian/20190801T025637Z stretch main non-free contrib" >> /etc/apt/sources.list
-  fi
-  apt update
-  # Installing prerequesites, Kvers, headers
-  apt install -y python-minimal aptitude linux-image-4.9.0-9-amd64 linux-headers-4.9.0-9-amd64
-  # Removing dev repository snapshot from source.list
-  sed -i '/20190801T025637Z/d' /etc/apt/sources.list
-  # Removing incompatible Kernel version
-  DEBIAN_FRONTEND=noninteractive apt remove -y linux-image-"$KVERS"
-  # Setting REBOOT flag to 1 because we need to boot with the right Kernel version
-  NEED_REBOOT=1
-fi
-
-# configure environment variable defaults needed for ansible
-ANSIBLE_VARS="PACKAGE_LOCATION=/tmp"
-if [ -n "${REPO_HOST}" ]; then
-    if [ -z "${REPO_PROTO}" ]; then
-        REPO_PROTO=http
-    fi
-    if [ -z "${REPO_DIST}" ]; then
-        REPO_DIST=stretch-stable
-    fi
-    if [ -z "${REPO_COMPONENT}" ]; then
-        REPO_COMPONENT=main
-    fi
-    # configure pkgrepo location
-    ANSIBLE_VARS="ovs_pkgrepo_proto=${REPO_PROTO} ovs_pkgrepo_host=${REPO_HOST} ovs_pkgrepo_path=${REPO_PATH} ${ANSIBLE_VARS}"
-
-    # configure pkgrepo distribution
-    ANSIBLE_VARS="ovs_pkgrepo_dist=${REPO_DIST} ovs_pkgrepo_component=${REPO_COMPONENT} ${ANSIBLE_VARS}"
-
-    # configure pkgrepo gpg key
-    ANSIBLE_VARS="ovs_pkgrepo_key=${REPO_KEY} ${ANSIBLE_VARS}"
-    if [ -z "${REPO_KEY_FINGERPRINT}" ]; then
-        ANSIBLE_VARS="ovs_pkgrepo_key_fingerprint=${REPO_KEY_FINGERPRINT} ${ANSIBLE_VARS}"
-    fi
-fi
-
-if [[ "${REPO_PROTO}" == 'https' ]]; then
-    echo "Ensure HTTPS apt transport method is installed"
-    apt install -y apt-transport-https
 fi
 
 if [ $NEED_REBOOT = 1 ]; then
@@ -141,8 +162,8 @@ Environment=REPO_HOST=${REPO_HOST}
 Environment=REPO_DIST=${REPO_DIST}
 Environment=REPO_COMPONENT=${REPO_COMPONENT}
 Environment=REPO_KEY=${REPO_KEY}
-Environment=SKIP_PRECHECK=${SUCCESS_MESSAGE}
 Environment=REPO_KEY_FINGERPRINT=${REPO_KEY_FINGERPRINT}
+Environment=SKIP_PRECHECK=${SUCCESS_MESSAGE}
 Type=oneshot
 ExecStart=/bin/bash ${AGW_SCRIPT_PATH}
 TimeoutStartSec=3800
@@ -153,52 +174,39 @@ Group=root
 WantedBy=multi-user.target
 EOF
   chmod 644 $AGW_INSTALL_CONFIG
+  ln -sf $AGW_INSTALL_CONFIG $AGW_INSTALL_CONFIG_LINK
   reboot
 fi
 
-echo "Making sure eth0 is connected to internet"
-PING_RESULT=$(ping -c 1 -I eth0 8.8.8.8 > /dev/null 2>&1 && echo "$SUCCESS_MESSAGE")
-if [ "$PING_RESULT" != "$SUCCESS_MESSAGE" ]; then
-  echo "eth0 (enp1s0) is not connected to internet, please double check your plugged wires."
-  exit 1
-fi
 echo "Checking if magma has been installed"
 MAGMA_INSTALLED=$(apt-cache show magma >  /dev/null 2>&1 echo "$SUCCESS_MESSAGE")
 if [ "$MAGMA_INSTALLED" != "$SUCCESS_MESSAGE" ]; then
   echo "Magma not installed, processing installation"
-  apt-get update
-  apt-get -y install curl make virtualenv zip rsync git software-properties-common python3-pip python-dev
+  apt-get -y install curl make virtualenv zip rsync git software-properties-common python3-pip python-dev apt-transport-https
+
   alias python=python3
   pip3 install ansible
 
   git clone "${GIT_URL}" /home/$MAGMA_USER/magma
-  cd /home/$MAGMA_USER/magma
+  cd /home/$MAGMA_USER/magma || exit
   git checkout "$MAGMA_VERSION"
 
   echo "Generating localhost hostfile for Ansible"
-  echo "[ovs_build]
-  127.0.0.1 ansible_connection=local
-  [ovs_deploy]
+  echo "[magma_deploy]
   127.0.0.1 ansible_connection=local" > $DEPLOY_PATH/agw_hosts
-  if [ -n "${FORCE_OVS_BUILD}" ]; then
-      echo "Triggering ovs_build playbook"
-      su - $MAGMA_USER -c "ansible-playbook -e \"MAGMA_ROOT='/home/$MAGMA_USER/magma' OUTPUT_DIR='/tmp'\" -i $DEPLOY_PATH/agw_hosts $DEPLOY_PATH/ovs_build.yml"
-      ANSIBLE_VARS="${ANSIBLE_VARS} ovs_use_pkgrepo=no"
-  fi
-  echo "Triggering ovs_deploy playbook"
-  if [[ $1 == "$CLOUD_INSTALL" ]]; then
-      su - $MAGMA_USER -c "ansible-playbook -e '${ANSIBLE_VARS}' -i $DEPLOY_PATH/agw_hosts $DEPLOY_PATH/ovs_deploy.yml --skip-tags \"skipfirstinstall\""
-      su - $MAGMA_USER -c "ansible-playbook -e '${ANSIBLE_VARS}' -i $DEPLOY_PATH/agw_hosts $DEPLOY_PATH/ovs_deploy.yml"
-      service openvswitch-switch restart
-  else
-      su - $MAGMA_USER -c "ansible-playbook -e '${ANSIBLE_VARS}' -i $DEPLOY_PATH/agw_hosts $DEPLOY_PATH/ovs_deploy.yml --skip-tags \"skipfirstinstall\""
-  fi
-  echo "Deleting boot script if it exists"
-  if [ -f "$AGW_INSTALL_CONFIG" ]; then
-    rm -rf $AGW_INSTALL_CONFIG
-  fi
+
+  # install magma and its dependencies including OVS.
+  su - $MAGMA_USER -c "ansible-playbook -e \"MAGMA_ROOT='/home/$MAGMA_USER/magma' OUTPUT_DIR='/tmp'\" -i $DEPLOY_PATH/agw_hosts $DEPLOY_PATH/magma_deploy.yml"
+
+  echo "Cleanup temp files"
+  cd /root || exit
+  rm -rf $AGW_INSTALL_CONFIG
   rm -rf /home/$MAGMA_USER/build
-  echo "AGW installation is done, make sure all services above are running correctly.. rebooting"
+  rm -rf /home/$MAGMA_USER/magma
+
+  echo "AGW installation is done, Run agw_post_install.sh install script after reboot to finish installation"
+  wget https://raw.githubusercontent.com/magma/magma/"$MAGMA_VERSION"/lte/gateway/deploy/agw_post_install.sh -P /root/
+
   reboot
 else
   echo "Magma already installed, skipping.."

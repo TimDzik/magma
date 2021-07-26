@@ -13,7 +13,7 @@
 ################################################################################
 
 - name: Set up Magma dev build environment on a local machine
-  hosts: dev
+  hosts: focal_dev
   become: yes
 
   vars:
@@ -22,6 +22,8 @@
     full_provision: true
 
   roles:
+    # Putting it first as we need sftp enabled
+    - role: focal_hacks
     # This role is commented out for now because as it turns out, it's very
     # difficult to install Debian on a box without also installing packages
     # from an upstream mirror. Even if we pin a snapshot to before the 4.9.0-11
@@ -32,8 +34,8 @@
     #- role: stretch_snapshot
     - role: gateway_dev
       vars:
-        distribution: "stretch"
-        repo: "dev"
+        distribution: "focal"
+        repo: "dev-focal"
         config_dir: "lte/gateway/configs"
     - role: dev_common
       vars:
