@@ -68,6 +68,8 @@
       - dkms
       - uuid-runtime
       - ca-certificates
+  tags:
+    - agwc
 
 - name: Preconfigure wireshark (tshark) SUID property
   become: yes
