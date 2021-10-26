@@ -219,7 +219,7 @@ def s1ap_setup_cloud():
 
 def integ_test(
     gateway_host=None, test_host=None, trf_host=None,
-    destroy_vm='True', provision_vm='True',
+    destroy_vm='True', provision_vm='True', from_registry='False'
 ):
     """
     Run the integration tests. This defaults to running on local vagrant
@@ -253,11 +253,14 @@ def integ_test(
     else:
         ansible_setup(gateway_host, "dev", "magma_dev.yml")
         gateway_ip = gateway_host.split('@')[1].split(':')[0]
-
-    execute(_dist_upgrade)
-    execute(_build_magma)
-    execute(_run_sudo_python_unit_tests)
-    execute(_start_gateway)
+        
+    if from_registry:
+        execute(_install_magma)
+    else:
+        execute(_dist_upgrade)
+        execute(_build_magma)
+        execute(_run_sudo_python_unit_tests)
+        execute(_start_gateway)
 
     # Run suite of integ tests that are required to be run on the access gateway
     # instead of the test VM
@@ -534,6 +537,15 @@ def _dist_upgrade():
     """ Upgrades OS packages on dev box """
     run('sudo apt-get update')
     run('sudo DEBIAN_FRONTEND=noninteractive apt-get -y dist-upgrade')
+
+
+def _install_magma():
+    """
+    Build magma on AGW
+    """
+    with cd(AGW_ROOT):
+        run('apt update')
+        all_magma = run('apt-cache madison magma')
 
 
 def _build_magma():
