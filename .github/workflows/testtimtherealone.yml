@@ -1,0 +1,11 @@
+---
+name: Push Bazel Cache To S3
+on: push
+
+jobs:
+  bazel-build-magma-vm-and-push-cache:
+    runs-on: macos-10.15
+    steps:
+      - run: echo "::set-output name=date::$(date +'%m-%d-%Y--%H-%M-%S')"
+        id: date
+      - run: date        
