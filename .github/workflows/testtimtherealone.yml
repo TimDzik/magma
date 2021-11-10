@@ -8,4 +8,5 @@ jobs:
     steps:
       - run: echo "::set-output name=date::$(date +'%m-%d-%Y--%H-%M-%S')"
         id: date
-      - run: date        
+      - run: date
+      - run: ls -l /etc/localtime|/usr/bin/cut -d"/" -f7,8         
