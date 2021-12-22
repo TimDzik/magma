@@ -2,20 +2,8 @@
 
 name: LTE integ test
 
-on:  # yamllint disable-line rule:truthy
-  workflow_dispatch:
-  workflow_run:
-    workflows:
-      - build-all
-    branches:
-      - master
-      - v1.*
-    types:
-      - completed
-
 jobs:
   lte-integ-test:
-    if: github.repository_owner == 'magma' || github.event_name == 'workflow_dispatch'
     runs-on: macos-10.15
     env:
       SHA: ${{ github.event.workflow_run.head_commit.id || github.sha }}
@@ -43,7 +31,7 @@ jobs:
       - name: Run the integ test
         run: |
           cd lte/gateway
-          fab integ_test
+          fab integ_test:build=False
       - name: Get test results
         if: always()
         run: |
