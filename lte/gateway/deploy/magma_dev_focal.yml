@@ -36,6 +36,7 @@
         distribution: "focal"
         repo: "dev-focal"
         config_dir: "lte/gateway/configs"
+    - role: artifactory 
     - role: dev_common
       vars:
         c_build: /home/{{ ansible_user }}/build/c
