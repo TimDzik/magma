@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 - name: Remove all old registries
-  shell: rm -rf /etc/apt/sources.list.d/f*.list
+  shell: rm -rf /etc/apt/sources.list.d/*.list
   become: yes
   ignore_errors: yes
 
@@ -28,7 +28,7 @@
   become: yes
   apt:
     name: "{{ packages }}"
-    state: latest
+    state: absent
   vars:
     packages:
       - ca-certificates
