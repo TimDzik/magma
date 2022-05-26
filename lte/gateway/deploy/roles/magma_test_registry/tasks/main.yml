@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 - name: Remove all old registries
-  shell: rm -rf /etc/apt/sources.list.d/*.list
+  shell: rm -rf /etc/apt/sources.list.d/f*.list
   become: yes
   ignore_errors: yes
 
@@ -18,11 +18,22 @@
   become: yes
   apt:
     name: "{{ packages }}"
-    state: latest
+    state: absent
     update_cache: yes
   vars:
     packages:
       - ca-certificates
+
+- name: Ensure ca-certificates is up to date
+  become: yes
+  apt:
+    name: "{{ packages }}"
+    state: latest
+  vars:
+    packages:
+      - ca-certificates
+
+
 
 - name: Copy gpg key from codebase
   copy:
