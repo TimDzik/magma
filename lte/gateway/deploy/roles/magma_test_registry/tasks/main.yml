@@ -14,26 +14,14 @@
   become: yes
   ignore_errors: yes
 
-- name: Ensure ca-certificates is up to date
-  become: yes
+- name: UPGRADE ca-certs
+  become: true
   apt:
     name: "{{ packages }}"
-    state: absent
-    update_cache: yes
+    only_upgrade: yes
   vars:
     packages:
       - ca-certificates
-
-- name: Ensure ca-certificates is up to date
-  become: yes
-  apt:
-    name: "{{ packages }}"
-    state: absent
-  vars:
-    packages:
-      - ca-certificates
-
-
 
 - name: Copy gpg key from codebase
   copy:
