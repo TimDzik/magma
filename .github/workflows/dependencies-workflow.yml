@@ -1,0 +1,42 @@
+# Copyright 2022 The Magma Authors.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Magma Dependencies and third_party workflow
+
+on:
+  workflow_dispatch: null
+  push:
+    paths:
+      - 'third_party/gtp_ovs/ovs-gtp-patches/**'
+    branches:
+      - master
+      - 'v1.*'
+
+jobs:
+  ovs_build:
+    if: github.repository_owner == 'magma'
+    env:
+      HELM_CHART_ARTIFACTORY_URL: "https://artifactory.magmacore.org:443/artifactory/"
+      HELM_CHART_MUSEUM_REPO: helm-test
+      HELM_CHART_MUSEUM_USERNAME: "${{ secrets.HELM_CHART_MUSEUM_USERNAME }}"
+      HELM_CHART_MUSEUM_TOKEN: "${{ secrets.HELM_CHART_MUSEUM_TOKEN }}"
+      MAGMA_ROOT: "${{ github.workspace }}"
+      EVENT_NAME: "${{ github.event_name }}"
+      ISSUE_NUMBER: "${{ github.event.number }}"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8 # pin@v3.1.0
+      - name: Pre Configure the machine
+        run: |
+      - name: Pre Configure the machine
+        run: |
+          mkdir /tmp/ovs-packages
+          third_party/gtp_ovs/ovs-gtp-patches/2.15/build.sh /tmp/ovs-packages 
