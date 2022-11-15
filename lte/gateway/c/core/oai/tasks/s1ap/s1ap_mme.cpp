@@ -36,10 +36,11 @@ extern "C" {
 #include "lte/gateway/c/core/oai/lib/message_utils/service303_message_utils.h"
 #include "lte/gateway/c/core/common/assertions.h"
 #include "lte/gateway/c/core/oai/lib/bstr/bstrlib.h"
-#include "lte/gateway/c/core/oai/include/mme_init.hpp"
 #ifdef __cplusplus
 }
 #endif
+
+#include "lte/gateway/c/core/oai/include/mme_init.hpp"
 #include "lte/gateway/c/core/common/dynamic_memory_check.h"
 #include "lte/gateway/c/core/oai/tasks/s1ap/s1ap_mme.hpp"
 #include "lte/gateway/c/core/oai/tasks/s1ap/s1ap_mme_decoder.hpp"
@@ -50,7 +51,7 @@ extern "C" {
 #include "lte/gateway/c/core/oai/include/mme_app_messages_types.h"
 #include "lte/gateway/c/core/oai/include/mme_config.h"
 #include "lte/gateway/c/core/oai/include/s1ap_messages_types.h"
-#include "lte/gateway/c/core/oai/include/sctp_messages_types.h"
+#include "lte/gateway/c/core/oai/include/sctp_messages_types.hpp"
 #include "lte/gateway/c/core/oai/tasks/s1ap/s1ap_mme_handlers.hpp"
 #include "lte/gateway/c/core/oai/tasks/s1ap/s1ap_mme_itti_messaging.hpp"
 #include "lte/gateway/c/core/oai/tasks/s1ap/s1ap_mme_nas_procedures.hpp"
@@ -470,7 +471,7 @@ void s1ap_remove_ue(oai::S1apState* state, oai::UeDescription* ue_ref) {
   map_uint64_ue_description_t* s1ap_ue_state = get_s1ap_ue_state();
   if (s1ap_ue_state == nullptr) {
     OAILOG_ERROR(LOG_S1AP, "Failed to get s1ap_ue_state");
-    return;
+    OAILOG_FUNC_OUT(LOG_S1AP);
   }
   s1ap_ue_state->remove(ue_ref->comp_s1ap_id());
   proto_map_uint32_uint32_t mmeid2associd_map;
@@ -482,10 +483,11 @@ void s1ap_remove_ue(oai::S1apState* state, oai::UeDescription* ue_ref) {
   ue_id_coll.remove(mme_ue_s1ap_id);
 
   imsi64_t imsi64 = INVALID_IMSI64;
-  s1ap_imsi_map_t* s1ap_imsi_map = get_s1ap_imsi_map();
-  s1ap_imsi_map->mme_ueid2imsi_map.get(mme_ue_s1ap_id, &imsi64);
+  magma::proto_map_uint32_uint64_t ueid_imsi_map;
+  get_s1ap_ueid_imsi_map(&ueid_imsi_map);
+  ueid_imsi_map.get(mme_ue_s1ap_id, &imsi64);
   delete_s1ap_ue_state(imsi64);
-  s1ap_imsi_map->mme_ueid2imsi_map.remove(mme_ue_s1ap_id);
+  ueid_imsi_map.remove(mme_ue_s1ap_id);
 
   OAILOG_DEBUG(LOG_S1AP, "Num UEs associated %u num elements in ue_id_coll %lu",
                enb_ref.nb_ue_associated(), ue_id_coll.size());
