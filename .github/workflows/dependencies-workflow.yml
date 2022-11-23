@@ -34,9 +34,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8 # pin@v3.1.0
+      - name: Setup JFROG CLI
+        uses: jfrog/setup-jfrog-cli@d0a59b1cdaeeb16e65b5039fc92b8507337f1559 # pin@v3
       - name: Pre Configure the machine
         run: |
       - name: Pre Configure the machine
         run: |
           mkdir /tmp/ovs-packages
-          third_party/gtp_ovs/ovs-gtp-patches/2.15/build.sh /tmp/ovs-packages 
+          third_party/gtp_ovs/ovs-gtp-patches/2.15/build.sh /tmp/ovs-packages
+      - name: Publish debian packages
+        id: publish_packages
+        if: github.event_name == 'push'
+        run: |
+          #Uploading it to the Linux foundation Registry
+          jf rt upload \
+            --recursive=false \
+            --detailed-summary \
+            --url https://linuxfoundation.jfrog.io/artifactory/ \
+            --user ${{ secrets.LF_JFROG_USERNAME }} \
+            --password ${{ secrets.LF_JFROG_PASSWORD }} \
+            --target-props="${DEBIAN_META_INFO}" \
+            "(*).deb" magma-packages-test/pool/focal-ci/{1}.deb
